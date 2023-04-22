@@ -1,0 +1,1969 @@
+function addEventListenerMultiple(el, eventListeners, callback, options = false) {
+    const events = eventListeners.split(' ');
+    for (e of events) {
+        el.addEventListener(e, callback, options);
+    }
+}
+
+function isAllowPassiveProp() {
+    let passiveSupported = false;
+    try {
+        return Object.defineProperty({}, "passive", {
+            get: function () { passiveSupported = true }
+        });
+    } catch (err) {}
+}
+
+const eventListenerPassiveOption = isAllowPassiveProp()
+
+function _fixMaskWhenCopypaste(selector) {
+    let inputmaskTypes = {};
+    $(document).on('keydown', selector, function (e) {
+        if (typeof e.keyCode == 'undefined' && this.inputmask) {
+            inputmaskTypes[$(this).attr('id')] = this.inputmask.opts;
+            $(e.target).inputmask('remove');
+        }
+    });
+    $(document).on('keyup', selector, function (e) {
+        if (typeof e.keyCode == 'undefined') {
+            $(e.target).inputmask(inputmaskTypes[$(this).attr('id')]);
+        }
+    });
+}
+
+function _fixScrollToInvalidFieldWIthInputmask() {
+    // For invalid field with inputmask. Scroll to field
+    $("[type=submit]").on('click', function() {
+        $("[inputmode]:invalid").on('focus', function() {
+            window.scrollTo(0, $(this).offset().top - 40)
+            $(this).off('focus')
+        })
+    })
+}
+_fixScrollToInvalidFieldWIthInputmask()
+
+function maskField(selector, mask, removeMaskOnSubmit = true, additionalOpt = {}) {
+    if ($(selector).data("inputmask")) {
+        $(selector).inputmask();
+    } else {
+        $(selector).inputmask(Object.assign({
+            mask: mask, showMaskOnHover: false, removeMaskOnSubmit: removeMaskOnSubmit,
+            showMaskOnFocus: false, placeholder: '', clearMaskOnLostFocus: true
+        }, additionalOpt));
+    };
+    _fixMaskWhenCopypaste(selector)
+}
+
+function _checkGA() {
+    let flag = true;
+    // somehow ga is not load (on prod)
+    try { ga() } catch (error) { console.log(error); flag = false };
+    return flag
+}
+
+const CHECK_GA = _checkGA();
+
+function toggleSpinner(action, hideDelay = true, wrapper = $('.with-spinner')) {
+    const spinnerObj = $('<div class="spinner"><i class="fa-light fa-spinner fa-pulse fa-2x text-sky"></i></div>')
+    action === 'show'
+        ? wrapper.addClass('shown').append(spinnerObj)
+        : setTimeout(() => wrapper.removeClass('shown').find('.spinner').remove(), hideDelay ? 300 : 0)
+}
+
+function ajaxErrorHandler(err) {
+    if (err.status === 500) {
+        $('#modalPaymentFailed .error .error-text').html(err.statusText);
+    } else {
+        let errors = JSON.parse(err.responseText),
+            errorsData = errors.hasOwnProperty('errors') ? errors['errors'][0] : errors[Object.keys(errors)[0]][0],
+            errorsData2 = errors.hasOwnProperty('non_field_errors') ? errors['non_field_errors'][0] : errors[Object.keys(errors)[0]][0],
+            errorsData3 = errors.hasOwnProperty('detail') ? errors['detail'] : '';
+        $('#modalPaymentFailed .error').html(errorsData3 || errorsData || errorsData2);
+    }
+    $('#modalPaymentFailed').modal('show');
+}
+
+function toggleRequiredFields(wrapper, onlyVisible = true) {
+    const fieldsSelector = onlyVisible ? 'input:visible, select:visible, textarea:visible' : 'input, select, textarea'
+    wrapper.find(fieldsSelector).prop('required', wrapper.is(":visible"))
+}
+
+// prevent double click
+$(function () {
+    // disable submit buttons
+    const forms = $("#submitShippingForm");
+    forms.on('submit', function () {
+        forms.find("[type=submit], [type=button]").prop("disabled", true);
+    });
+});
+
+const ddcScripts = {
+    ResizeObserverPolyfill: function () {
+        // Safari version < 13 doesn't have this class. For pdf viewer
+        if (!window.ResizeObserver) {
+            window.ResizeObserver = class ResizeObserver {
+                constructor(callback) {
+                    this.observables = [];
+                    this.boundCheck = this.check.bind(this);
+                    this.boundCheck();
+                    this.callback = callback;
+                }
+
+                observe(el) {
+                    if (this.observables.some((observable) => observable.el === el)) {
+                        return;
+                    }
+                    const newObservable = {
+                        el: el,
+                        size: {
+                            height: el.clientHeight,
+                            width: el.clientWidth
+                        }
+                    }
+                    this.observables.push(newObservable);
+                }
+
+                unobserve(el) {
+                    this.observables = this.observables.filter((obj) => obj.el !== el);
+                }
+
+                disconnect() {
+                    this.observables = [];
+                }
+
+                check() {
+                    const changedEntries = this.observables.filter((obj) => {
+                        const currentHeight = obj.el.clientHeight;
+                        const currentWidth = obj.el.clientWidth;
+                        if (obj.size.height !== currentHeight || obj.size.width !== currentWidth) {
+                            obj.size.height = currentHeight;
+                            obj.size.width = currentWidth;
+                            return true;
+                        }
+                    }).map((obj) => obj.el);
+                    if (changedEntries.length > 0) {
+                        this.callback(changedEntries);
+                    }
+                    window.requestAnimationFrame(this.boundCheck);
+                }
+            }
+        }
+    },
+    dateMaskSimple: function () {
+        $("input[data-type=date]").attr("placeholder", "mm/dd/yyyy")
+    },
+    maskPhoneScripts: function() {
+        const phoneLengths = {
+            3: '999',
+            4: '9999',
+        };
+        $('.US-format input').each(function() {
+            const inp = $(this)
+            inp.on('keyup', function () {
+                inp.val().length >= 3 && inp.nextAll('input').eq(0).focus();
+            });
+        });
+        $("[data-type=phone], [name*=phone]").not("[inputmode]").not('[data-type="money"]').each(function() {
+            const maxLength = $(this).attr('maxlength');
+            if ( Boolean(maxLength) && maxLength === "3" || maxLength === "4" ) {
+                maskField($(this), phoneLengths[+maxLength], true, {autoUnmask: true})
+                $(this).prop('maxLength', maxLength)
+                $(this).prop('minLength', maxLength)
+            } else {
+                maskField($(this), '(999) 999 - 9999', true)
+            }
+        });
+    },
+    maskCCFieldScript: function() {
+        maskField($("[name*=ccnum], #id_card_number"), '9999 9999 9999 9999 9999')
+        maskField($("#id_cvv"), '9{4}')
+    },
+    headerMenuScripts: function() {
+        const body = document.querySelector('body')
+        const headerNavBtn = document.querySelector('.header-menu-control')
+        const headerNav = document.querySelector('.header-nav')
+        const listenerOpt = {
+            capture: false,
+            once: true,
+            passive: false
+        }
+
+        $(window).on('load resize orientationchange', function () {
+            $('.header-nav__control').on('click', function () {
+                if (window.innerWidth <= 992) {
+                    $('.header-nav__control').dropdown('dispose')
+                }
+            })
+
+            if (window.innerWidth > 992) {
+                $(window).ready(function () {
+                    $(".header-nav-not-funnel").on('mouseover', function () {
+                        $('.header_with-links_transparent').removeClass('hide').addClass('show')
+                        $('.slide-header-dropdown').addClass('show')
+                        $('.tm-icon').slideDown({duration:400})
+                        $('.img-default').addClass('d-none')
+                        $('.img-mobile').removeClass('d-lg-none').addClass('d-lg-block')
+                        $('.logo-slogan').addClass('logo-slogan-blue')
+                    });
+                    $('main:not([data-inner])').on('mouseover', function () {
+                        $('.header_with-links_transparent').removeClass('show').addClass('hide')
+                        $('.slide-header-dropdown').removeClass('show')
+                        $('.tm-icon').slideUp({duration:50})
+                        $('.img-mobile').addClass('d-lg-none')
+                        $('.img-default').removeClass('d-none').addClass('img-default')
+                        $('.logo-slogan').removeClass('logo-slogan-blue').addClass('text-white')
+                    });
+                });
+            } else {
+                $('.header_with-links_transparent').removeClass('show').addClass('hide')
+                $('.header-nav__arrow-icon').css({"transform": "rotate(0deg)"})
+                $('.img-mobile').addClass('d-lg-none')
+                $('.img-default').removeClass('d-none').addClass('img-default')
+                $(".header-nav-not-funnel").on('mouseover', function () {
+                    $('.logo-slogan').addClass('logo-slogan')
+                });
+
+            }
+        });
+
+        headerNavBtn && headerNavBtn.addEventListener('click', () => {
+            // Waiting ending of transition and add .d-none
+            body.classList.contains('header-shown') && headerNav.addEventListener(
+                'transitionend', () => headerNav.classList.add('d-none'), listenerOpt);
+
+            headerNav.classList.remove('d-none')
+            // To prevent links blinking when change display from none to flex
+            setTimeout(() => body.classList.toggle('header-shown'))
+
+            $('.tm-icon').slideToggle({duration:50});
+            $('.header-nav-not-funnel').on('mouseout', function () {
+                $('.header_with-links_transparent').removeClass('show').addClass('hide')
+            })
+            $('.logo-slogan-mob').slideToggle({duration:0});
+            $('.header-nav-not-funnel').on('mouseout', function () {
+                $('.header_with-links_transparent').removeClass('show').addClass('hide')
+            })
+        })
+    },
+    homeScripts: function(url) {
+        const introBlock = $('.intro-block')
+        webpEnabled = () => document.createElement('canvas').toDataURL('image/webp').indexOf('data:image/webp') == 0;
+        isSafariBrowser = () => navigator.userAgent.indexOf('Safari') > -1 && navigator.userAgent.indexOf('Chrome') <= -1
+        webpEnabled() && !isSafariBrowser() ? introBlock.addClass('webp') : introBlock.addClass('jpg')
+
+        ddcScripts.scrollToBlock($('.scroll-to-lead'))
+
+        const leadBtn = $('.js-lead-btn')
+        const stateField = $('#state')
+
+        stateField.on('change', (e) => {
+            if ($(e.target).val()) window.location.href = url.replace('alabama', stateField.val());
+        })
+
+        leadBtn.on('click', () => {
+            !stateField.val() && $('#statesPopupId').modal('show')
+        })
+    },
+    blockWithMap: function() {
+        // Map highlight on hover
+        const USACaMap = $('#USACaMap')
+        const statesList = $('.map-states-wrap')
+        const clearStateHighlight = () => {
+            const highlight = USACaMap.find('.highlight')
+            highlight && highlight.removeClass('highlight')
+        }
+
+        const onMapStates = USACaMap.find('path[class], rect[class]')
+        onMapStates.on('mouseover', event => {
+            const state = $(event.target).attr('class')
+            const stateOnMap = USACaMap.find(`.${state}`)
+            clearStateHighlight()
+            stateOnMap && stateOnMap.addClass('highlight')
+        })
+        onMapStates.on('mouseleave', clearStateHighlight)
+
+        statesList.on('mouseover', event => {
+            const state = event.target.dataset.state
+            const stateOnMap = USACaMap.find(`.${state}`)
+            clearStateHighlight()
+            stateOnMap && stateOnMap.addClass('highlight')
+        })
+        statesList.on('mouseleave', clearStateHighlight)
+    },
+    accordionPlugin: function() {
+        function checkAccordionEnable(accordionControl) {
+            // Expand accordion or not.
+            let enable = true
+            if (accordionControl.classList.contains('accordion-control_gt-lg')) enable = window.innerWidth > 992 // With .accordion-control_gt-lg accordion works only with (width > 992)
+            if (accordionControl.classList.contains('accordion-control_lt-md')) enable = window.innerWidth < 768 // With .accordion-control_lt-md accordion works only with (width < 768)
+            return enable
+        }
+
+        function animationAccordionToggleSign(accordionBlock) {
+            // For accordion with show/hide control block. Example: text "Show" should change on "Hide"
+            const accordionControlSignShowHide = accordionBlock.querySelector('.accordion-control__sign_show-hide')
+            if (accordionControlSignShowHide) {
+                const showHide = Array.from(accordionControlSignShowHide.children)
+                showHide.forEach(el => el.classList.toggle('hide'))
+            }
+        }
+
+        function hideOpenedAccordions(parentNode, pressedBlockContent) {
+            // For accordion groups. If one accordion opened, when open another, first one closing
+            const accordionsToClose = document.querySelectorAll(`${parentNode} .accordion-content`)
+            for (el of accordionsToClose) {
+                if (!pressedBlockContent.isEqualNode(el)) el.style.maxHeight = null;
+            }
+        }
+
+        function closeOnClickOutside() {
+            // Close accordion if click outside of it
+            document.addEventListener('click', e => {
+                if (!e.target.classList.contains('accordion-control')) {
+                    const closable = document.querySelectorAll('[data-close-outside="true"].shown')
+                    closable.forEach(el => {
+                        el.classList.remove('shown')
+                        el.closest('.accordion-block').querySelector('.accordion-content').style.maxHeight = null
+                    })
+                }
+            })
+        }
+
+        function initAccordionOnPage() {
+            document.addEventListener('click', e => {
+                const accordionControl = e.target
+
+                if (accordionControl.classList.contains('accordion-control')) {
+                    const accordionBlock = accordionControl.closest('.accordion-block')
+
+                    if (checkAccordionEnable(accordionControl)) {
+                        accordionControl.classList.toggle('shown')
+                        animationAccordionToggleSign(accordionBlock)
+
+                        const accordionContent = accordionBlock.querySelector('.accordion-content')
+                        accordionControl.dataset.expandSingle === 'true' && hideOpenedAccordions(accordionControl.dataset.parentNode, accordionContent)
+
+                        if (accordionContent.style.maxHeight) {
+                            accordionContent.style.maxHeight = null;
+                        } else {
+                            accordionContent.style.maxHeight = accordionContent.scrollHeight + "px";
+                        }
+                    }
+                }
+            })
+
+            closeOnClickOutside()
+        }
+        document.querySelectorAll('.accordion-control').length && initAccordionOnPage()
+    },
+    reviewBlockCustomers: function () {
+        const $slider = $('.review-customers');
+
+        $slider.each(function (i, s) {
+            const slider = $(s);
+            const $sliderWrap = slider.parents('.reviews-content')
+            const $progressBar = $('.progress-active', $sliderWrap);
+            const $status = $('.pagingInfo', $sliderWrap);
+            const $countsSlides = $('.countsSlides', $sliderWrap);
+
+            slider.on('beforeChange', function (event, slick, currentSlide, nextSlide) {
+                const calc = ((nextSlide) / (slick.slideCount)) * 100;
+
+                $progressBar
+                    .css('left', calc + '%')
+            });
+
+            slider.on('afterChange', function (event, slick, currentSlide) {
+                $countsSlides.text(currentSlide + 1)
+            });
+            slider.on('init', function (event, slick) {
+                $status.text(slick.slideCount);
+                $progressBar.css('width', 100/slick.slideCount + '%')
+            });
+
+            slider.slick({
+                speed: 1000,
+                infinite: false,
+                slidesToShow: 1.2,
+                cssEase: 'linear',
+                arrow: true,
+                prevArrow: $('.custom-slick-prev', $sliderWrap),
+                nextArrow: $('.custom-slick-next', $sliderWrap),
+                responsive: [
+                    {
+                        breakpoint: 767,
+                        settings: {
+                            slidesToShow: 1
+                        }
+                    }
+                ]
+            });
+        })
+    },
+    videoSlick: function () {
+        const $slider = $('.video-slick');
+        const $sliderWrap = $slider.parents('#videoSlider');
+        const $progressBar = $('.progress-active', $sliderWrap);
+        const $countsSlides = $('.countsSlides', $sliderWrap);
+        const $status = $('.pagingInfo', $sliderWrap);
+
+        $slider.on('beforeChange', function (event, slick, currentSlide, nextSlide) {
+            const calc = ((nextSlide) / (slick.slideCount)) * 100;
+
+            $progressBar.css('left', calc + '%')
+        });
+
+        $slider.on('afterChange', function (event, slick, currentSlide) {
+            $countsSlides.text(currentSlide + 1 )
+        });
+        $slider.on('init', function (event, slick) {
+            $status.text(slick.slideCount);
+            $progressBar.css('width', 100 / slick.slideCount + '%')
+        });
+
+        $slider.slick({
+            speed: 1000,
+            cssEase: 'linear',
+            centerMode: true,
+            centerPadding: '15%',
+            slidesToShow: 1,
+            asNavFor: '.video-review-content',
+            arrow: false,
+            prevArrow: $('.custom-slick-prev', $sliderWrap),
+            nextArrow: $('.custom-slick-next', $sliderWrap),
+            responsive: [
+                {
+                    breakpoint: 767,
+                    settings: {
+                        centerMode: false,
+                    }
+                }
+            ]
+        });
+        $('.video-review-content').slick({
+            slidesToShow: 1,
+            slidesToScroll: 1,
+            arrows: false,
+            fade: true,
+            asNavFor: '.video-slick'
+        });
+    },
+    defaultSlick: function () {
+        $('.default-slick').slick({
+            dots: false,
+            arrows: false,
+            infinite: false,
+            speed: 300,
+            slidesToShow: 3,
+            adaptiveHeight: true,
+            responsive: [
+                {
+                    breakpoint: 767,
+                    settings: {
+                        slidesToShow: 1.5
+                    }
+                }
+            ]
+        });
+    },
+    starSlick: function (){
+        const $slider = $('.star-slick');
+        const $sliderWrap = $slider.parents('.reviews-content');
+        const $progressBar = $('.progress-active', $sliderWrap);
+        const $status = $('.pagingInfo', $sliderWrap);
+        const $countsSlides = $('.countsSlides', $sliderWrap);
+
+        $slider.on('beforeChange', function (event, slick, currentSlide, nextSlide) {
+            const calc = ((nextSlide) / (slick.slideCount)) * 100;
+
+            $progressBar
+                .css('left', calc + '%')
+        });
+
+        $slider.on('afterChange', function (event, slick, currentSlide) {
+            $countsSlides.text(currentSlide + 1)
+        });
+        $slider.on('init', function (event, slick) {
+            $status.text(slick.slideCount);
+            $progressBar.css('width', 100 / slick.slideCount + '%')
+        });
+
+       $slider.slick({
+            speed: 1000,
+            dots: false,
+            infinite: true,
+            slidesToShow: 4,
+            adaptiveHeight: true,
+            prevArrow: $('.custom-slick-prev', $sliderWrap),
+            nextArrow: $('.custom-slick-next', $sliderWrap),
+            responsive: [
+                {
+                    breakpoint: 992,
+                    settings: {
+                        slidesToShow: 3
+                    }
+                },{
+                    breakpoint: 767,
+                    settings: {
+                        infinite: false,
+                        slidesToShow: 1.3
+                    }
+                }
+            ]
+        });
+
+    },
+    toggleReadMoreScript: function (){
+        $(".toggleReadMore").on('click', function () {
+            $(".text-read-more", this).toggle('');
+        });
+    },
+    documentSamplesSliderModal: function (docs, state) {
+        const modalIdSelector = `#eligibilityViewDoc${state}`
+        const $slider = $(`${modalIdSelector} .eligibility-modal-slider`);
+        const $sliderWrap = $(modalIdSelector);
+
+        function sliderInit() {
+            const $countsSlides = $('.countsSlides', $sliderWrap);
+            const $status = $('.pagingInfo', $sliderWrap);
+
+            $slider.on('afterChange', function (event, slick, currentSlide) {
+                const newSlideNum = currentSlide + 1
+                $countsSlides.text(newSlideNum)
+                if (!$.isEmptyObject(docs) && !$(`#formSample${newSlideNum}`).contents().length) {
+                    showPDF(newSlideNum, Object.values(docs)[currentSlide])
+                }
+            });
+            $slider.on('init', function (event, slick) {
+                $status.text(slick.slideCount);
+                if (!$.isEmptyObject(docs)) {
+                    const firstDoc = docs[Object.keys(docs)[0]]
+                    showPDF(1, firstDoc)
+                }
+            });
+
+            $slider.not('.slick-initialized').slick({
+                speed: 700,
+                infinite: false,
+                slidesToShow: 1,
+                cssEase: 'linear',
+                draggable: false,
+                swipe: false,
+                arrow: false,
+                prevArrow: $('.custom-slick-prev', $sliderWrap),
+                nextArrow: $('.custom-slick-next', $sliderWrap),
+            });
+        }
+
+        const slideTmpl = (name, num) => `
+            <div class="review-item doc-height noselect">
+                <h4 class="h4 fw-medium text-capitalize mb-4">${name}</h4>
+                <p class="text-18 mb-5">Our online solution guides you to fill in these forms with the information 
+                that's relevant to you. Then simply download your personalized, completed forms, or have us mail 
+                them to you!</p>
+                <div class="d-none exp-d-block mb-4">
+                    <div class="slick-buttons w-100 d-flex jc-between ai-center">
+                        <span class="custom-slick-prev">
+                            <i class="fa-thin fa-arrow-left text-18-20"></i>
+                        </span>
+                        <div class="page-text fw-normal">
+                            <span class="countsSlides">1</span>
+                            <span class="text-gray">/</span>
+                            <span class="all-slide pagingInfo"></span><span></span>
+                        </div>
+                        <span class="custom-slick-next">
+                            <i class="fa-thin fa-arrow-right text-18-20"></i>
+                        </span>
+                    </div>
+                </div>
+                <div id="formSample${num}" class="h-100 overflow-hidden"></div>
+            </div>
+        `
+
+        $sliderWrap.on("shown.bs.modal", function () {
+            let docNum = 1
+            if (!$(`${modalIdSelector} #formSample${docNum}`).contents().length) {
+                for (let docName in docs) {
+                    const newSlide = slideTmpl(docName, docNum)
+                    $slider.append(newSlide)
+                    docNum++
+                }
+                sliderInit()
+            }
+            setTimeout(() => $slider.removeClass('invisible'))
+        })
+
+        $sliderWrap.on("hide.bs.modal", function () {
+            $slider.addClass('invisible')
+        })
+
+        function showPDF(selectorNumID, filepath) {
+            (async () => {
+                const pdfViewer = await window.Accusoft.PdfViewerControl.create({
+                    sourceDocument: filepath,
+                    container: $(`${modalIdSelector} #formSample${selectorNumID}`)[0]
+                });
+            })()
+        }
+    },
+    ajaxGetStateInfoAndSamples: function(options) {
+        function getStateText(state) {
+            const url = options.urlStateInfo.replace('alabama', state)
+            $.get(url, function(data) {
+                $('#content').html(data.page)
+            })
+        }
+
+        function getStateSamples(state) {
+            const newModalId = `#eligibilityViewDoc${state}`
+            $('.eligibility-view-doc').attr('data-bs-target', newModalId)
+
+            if (!$(`#eligibilityViewDoc${state}`).length) {
+                let docs = {}
+                $.ajax({
+                    method: 'GET',
+                    url: options.urlStateFormSamples.replace('alabama', state),
+                    statusCode: {
+                        200: function (docs) {
+                            if (!$.isEmptyObject(docs)) {
+                                const newModal = options.functionSampleDocsModalTmpl(state)
+
+                                $('main').append(newModal)
+                                bootstrap.Modal.getOrCreateInstance($(newModalId))
+                                $('.sample-documents-wrap').show()
+
+                                ddcScripts.documentSamplesSliderModal(docs, state)
+                            } else {
+                                $('.sample-documents-wrap').hide()
+                            }
+                        },
+                        400: function (data) {
+                            data = JSON.parse(data.responseText)
+                            console.log(data)
+                        }
+                    },
+                })
+            }
+        }
+
+        function drawInfo(state) {
+            if (state !== '0') {
+                getStateText(state)
+                getStateSamples(state)
+            }
+        }
+
+        drawInfo($("#selectState").val())
+        $(options.stateSelector).on('change', function() { drawInfo($(this).val()) })
+    },
+    eligibilityFormSlider: function (redirectUrl) {
+        const $slider = $('.eligibility-form');
+        const $sliderWrap =  $('.eligibility-form').parents('.eligibility-form-content')
+        const $progressBar = $('.eligibility-progress-active', $sliderWrap);
+        const $countsSlides = $('.countsSlides', $sliderWrap);
+        const $status = $('.pagingInfo', $sliderWrap);
+
+        const form = $('#eligibilityForm');
+        const btnContinue = $("#eligibilityBtnContinue")
+        const arrowNextSlide = $('.js-arrow-next')
+
+        const stateField = $('#id_state_of_filing')
+        const initStateValue = stateField.val()
+        let initialSlide = 0
+        // When change state in select
+        stateField.on('change', function() {
+            window.location.href.indexOf('?summary') > -1 && $('.control-js').prop('disabled', true)
+            $('.custom-slick-next', form).prop('disabled', true);
+            window.location = window.location.href.replace(initStateValue, $(this).val())
+        })
+        // When back on page from summary page
+        if (window.location.href.indexOf('?summary') > -1) {
+            _toggleSubmitBtn(true)
+            $('.custom-slick-next').removeClass('custom-slick-next')
+        }
+        // When back on page from requirements page
+        if (window.location.href.indexOf('?requirements') > -1) {
+            initialSlide = _getInitialSlideNum()
+            _toggleSubmitBtn(true)
+            btnContinue.hide()
+        }
+
+        // Because if we open this page afte mediation landing. Here breaks form submitting
+        !$('[name=know_spouse_location]:checked').length && $('[name=service_name]').prop('checked', false)
+
+        function _getInitialSlideNum() {
+            return $("[name=spouse_in_agreement]:checked").val() === '1' ? 3 : 4
+        }
+
+        function _setSlidesNumAndDrawProgress(currentSlideNum, totalSlidesNum) {
+            $status.text(totalSlidesNum);
+            $countsSlides.text(currentSlideNum)
+
+            const bgWidthX = currentSlideNum ? 100 * currentSlideNum / totalSlidesNum : 0
+            $progressBar.css('background-size', `${bgWidthX}% 100%`) // safari needs both values
+        }
+
+        function _toggleButtonVisibility(selector) {
+            selector.hasClass('with-button') ? btnContinue.removeClass('hide-visibility').parent().removeClass('d-none d-sm-block')
+                : btnContinue.addClass('hide-visibility').parent().addClass('d-none d-sm-block')
+        }
+
+        function _getFilterOptions() {
+            // If spouse_in_agreement = 1 (Yes) => hide question service_name
+            // If service_name = 'mediation' => hide question children_of_marriage
+            const spouseInAgreementValue = $slider.find("[name=spouse_in_agreement]:checked").val()
+            const serviceNameValue = $slider.find("[name=service_name]:checked").val()
+            let filterSelector = ""
+            let affectedInputs = ""
+            if (spouseInAgreementValue === '1') {
+                filterSelector += ':not(.service-name-item)'
+                affectedInputs += "[name=service_name]"
+            }
+            if (serviceNameValue === 'mediation') {
+                filterSelector += ':not(.children-item)'
+                affectedInputs += affectedInputs.length ? ",[name=children_of_marriage]" : "[name=children_of_marriage]"
+            }
+            return {filterSelector: filterSelector, affectedInputs: affectedInputs}
+        }
+
+        function _applyFilterToSlider() {
+            const {filterSelector, affectedInputs} = _getFilterOptions()
+            $slider.slick("slickUnfilter")
+            $('input, select', $slider).prop('required', true)
+
+            if (filterSelector) {
+                $slider.slick("slickFilter", filterSelector)
+                $(affectedInputs).prop('required', false)
+            }
+            _toggleButtonVisibility($('.slick-active'))
+            _setSlidesNumAndDrawProgress($slider[0].slick.currentSlide, $slider[0].slick.slideCount)
+        }
+
+        function _toggleSubmitBtn(makeSubmit=false) {
+            if (makeSubmit) {
+                btnContinue.prop("type", "submit");
+                arrowNextSlide.addClass("submit-form");
+            } else {
+                btnContinue.prop("type", "button");
+                arrowNextSlide.removeClass("submit-form");
+            }
+        }
+
+        $slider.on('init', function (event, slick) {
+            _setSlidesNumAndDrawProgress(slick.currentSlide, slick.slideCount)
+        });
+
+        $slider.on('reInit', function (event, slick) {
+            // To prevent height jumps after slickFilter
+            slick.currentSlide === 3 ? $('.slick-list').css({'min-height': $(`[data-slick-index=${slick.currentSlide}]`).outerHeight()}) : $('.slick-list').removeAttr('style')
+        });
+
+        $slider.on('beforeChange', function (event, slick, currentSlide, nextSlide) {
+            _setSlidesNumAndDrawProgress(nextSlide, slick.slideCount)
+            // Hide continue button on slides with radio buttons
+            _toggleButtonVisibility($(`[data-slick-index=${nextSlide}]`))
+        });
+
+        $slider.on('afterChange', function (event, slick, currentSlide) {
+            $countsSlides.text(currentSlide)
+            _toggleSubmitBtn(currentSlide === (slick.slideCount - 1))
+        });
+
+        $slider.slick({
+            initialSlide: initialSlide,
+            adaptiveHeight: true,
+            speed: 500,
+            fade: true,
+            infinite: false,
+            slidesToShow: 1,
+            cssEase: 'linear',
+            draggable: false,
+            swipe: false,
+            arrows: false
+        });
+
+        $(document).on('click', function(event) {
+            const target = $(event.target)
+            target.hasClass('submit-form') && form.submit()
+
+            if (target.hasClass('control-js')) {
+                const totalSlidesNum = $slider[0].slick.slideCount
+                const currentSlideNum = $slider[0].slick.currentSlide
+                const nextSlideNum = currentSlideNum + 1
+                const currentSlide = $slider.find('.slick-active')
+
+                const currFieldName = $(currentSlide).find('[name]').first().attr('name')
+                const currField = $(`[name=${currFieldName}]`)
+
+                if (target.hasClass('custom-slick-next')) {
+                    if (currField[0].checkValidity()) {
+                        _setSlidesNumAndDrawProgress(nextSlideNum, totalSlidesNum)
+                        $slider.slick('slickGoTo', nextSlideNum)
+                    } else {
+                        $(`[name=${currFieldName}]`)[0].reportValidity()
+                    }
+                }
+            }
+            // Radio inputs like button logic
+            if (target.data('inp-name')) {
+                const value = target.data('inp-value')
+                const fieldName = target.data('inp-name')
+                const radioBtn = $(`[name=${fieldName}][value="${value}"]`)
+                $(`[data-inp-name=${fieldName}]`).addClass('btn-secondary')
+                target.removeClass('btn-secondary')
+                radioBtn.click()
+                if (fieldName === 'children_of_marriage') {
+                    form.submit()
+                }
+            }
+        })
+
+        const redirectField = $('[name=redirect]', form)
+        form.on('submit', function(e) {
+            e.preventDefault()
+            const fields = $('input,select', form)
+            for (let i = 0; i < fields.length; i++) {
+                const currField = $(`[name=${fields[i].name}]`, form)
+                if (!currField[0].checkValidity()) {
+                    const slickItem = currField.parents('.review-item')[0]
+                    $slider.slick('slickGoTo', $(slickItem).data('slick-index'))
+                    setTimeout(() => { currField[0].reportValidity() }, 500)
+                    return
+                }
+            }
+
+            const serviceFieldValue = $('[name=service_name]:checked', form).val()
+            serviceFieldValue === 'mediation' && redirectField.val(redirectUrl)
+            form.off('submit').submit()
+        })
+
+        _applyFilterToSlider()
+        $(".slick-track").on("change", "input[type=radio]", function() {
+            const inputName = $(this).attr('name')
+            if ( inputName === 'spouse_in_agreement' || inputName === 'service_name') _applyFilterToSlider()
+            _toggleSubmitBtn(inputName === 'service_name' && $(`[name=${inputName}]:checked`).val() === 'mediation')
+        })
+    },
+    transformSelects: function(selector) {
+        const DEFAULT_SELECT_VALUE = "Please Select"
+        $(selector).each((i, select) => {
+            const selectOptions = $(select).find('option')
+            const selectedValue = $(select).find(':selected').text() || DEFAULT_SELECT_VALUE
+
+            const customSelectTmpl = (initValue, options) => `
+                <div class="input-group custom-select-wrap">
+                    <button class="custom-select dropdown-toggle" type="button" data-bs-toggle="dropdown" data-bs-display="static" aria-expanded="false"><div>${initValue}</div></button>
+                    <ul class="dropdown-menu js-dropdown-menu">
+                        ${options}
+                    </ul>
+                </div>
+            `
+            const pseudoOptionTmpl = ({value, display, selected}) => selected ?
+                `<li data-value="${value}" data-selected="${selected}">${display}</li>` :
+                `<li data-value="${value}">${display}</li>`
+            const pseudoOptionData = []
+            selectOptions.each((i, el) => {
+                pseudoOptionData.push({
+                    value: $(el).attr('value'),
+                    display: $(el).text(),
+                    selected: $(el).attr('selected')
+                })
+            })
+            const pseudoOptionsResult = pseudoOptionData.map(pseudoOptionTmpl).join('')
+            const customSelectResult = customSelectTmpl(selectedValue, pseudoOptionsResult)
+
+            $(select).addClass('hide-visibility')
+            $(customSelectResult).insertBefore($(select))
+        })
+        $(document).on('click', (e) => {
+            const target = $(e.target)
+            const targetParent = target.parent()
+            if (targetParent.hasClass('js-dropdown-menu')) {
+                const customSelectWrapper = target.parents('.custom-select-wrap')
+                const chainedSelect = customSelectWrapper.next()
+                const newValue = typeof target.data("value") === "boolean" ? String(target.data("value")) : target.data("value")
+                targetParent.find('[data-selected]').removeAttr('data-selected')
+                target.attr('data-selected', 'selected')
+
+                chainedSelect.val(newValue).change()
+                const newDisplay = chainedSelect.find(':selected').text() || DEFAULT_SELECT_VALUE
+                const pseudoSelect = targetParent.prev()
+                pseudoSelect.html(`<div>${newDisplay}</div>`)
+            }
+
+        })
+
+        $("input[data-type='separated date']").on('focus', function() {
+            // Hack to hide select if focus on field separated date in funnel
+            $('.custom-select.show').length && $('.custom-select.show').dropdown('hide')
+        })
+
+        $('select').on('focus', function () { $(this).prev().find('button').addClass('select-required')})
+        $('select').on('blur', function () { $(this).prev().find('button').removeClass('select-required')})
+    },
+    phoneNumberWidgetScripts: function() {
+        const US_FORMAT = 'us',
+            INTER_FORMAT = 'inter';
+
+        let internationalWrapper = $('.phone-wrapper.international-format'),
+            usWrapper = $('.phone-wrapper.US-format');
+
+        function required() {
+            if ($('.US-format input').attr('required') || $('.international-format input').attr('required')) {
+                $('.phone-wrapper.international-format, .phone-wrapper.US-format').each(function () {
+                    if ($(this).is(':hidden')) {
+                        $(this).find('input').removeAttr('required');
+                    } else {
+                        $(this).find('input').prop('required', true);
+                    }
+                });
+            }
+        }
+
+        function getActiveFormat() {
+            if ($('.phone-wrapper input:visible').length > 1) {
+                return US_FORMAT
+            }
+            return INTER_FORMAT
+        }
+
+        function getVal(format) {
+            let val = "";
+            if (format === US_FORMAT) {
+                $('.US-format input').each(function () {
+                    val += $(this).val()
+                });
+                return val
+            } else {
+                return $('.international-format input').inputmask('unmaskedvalue');
+            }
+        }
+
+        function setFormat(val, format) {
+            if (format === US_FORMAT) {
+                if (val.length <= 10) {
+                    let field = $('.US-format input');
+                    field.eq(0).val(val.slice(0, 3));
+                    field.eq(1).val(val.slice(3, 6));
+                    field.eq(2).val(val.slice(6, 10))
+                }
+            } else {
+                $('.international-format input').val(val)
+            }
+        }
+
+        function clearFormat(format) {
+            if (format === US_FORMAT) {
+                $('.US-format input').each(function () {
+                    $(this).val('')
+                });
+            } else {
+                $('.international-format input').val('')
+            }
+        }
+
+        function showHide() {
+            $('.international-phone-input').each(function () {
+                if (!$(this).val()) {
+                    internationalWrapper.hide();
+                    usWrapper.show();
+                } else {
+                    usWrapper.hide();
+                    internationalWrapper.show();
+                }
+                let reverseFormat = getActiveFormat() === US_FORMAT ? INTER_FORMAT : US_FORMAT;
+                clearFormat(reverseFormat)
+            });
+
+        }
+
+        $(".phone-wrapper input").on('keyup input paste propertychange', function (event) {
+            const inputParent = '.js-jump'
+            if (this.value.length == this.maxLength) {
+                $(this).parent(inputParent).nextAll(inputParent).first().find('input').focus();
+            } else if (this.value.length == 0 && event.which == 8) {
+                $(this).parent(inputParent).prevAll(inputParent).first().find('input').focus();
+            }
+            required();
+        });
+
+        $(".phone-toggle").on('click', function (event) {
+            event.preventDefault();
+            let format = getActiveFormat();
+            let currentVal = getVal(format);
+            clearFormat(format);
+            if ($(this).text().indexOf('International') >= 0) {
+                usWrapper.hide();
+                internationalWrapper.show();
+            } else {
+                internationalWrapper.hide();
+                usWrapper.show();
+            }
+            required();
+            format = getActiveFormat();
+            setFormat(currentVal, format)
+        });
+        showHide();
+        required();
+    },
+    premiumScripts: function (options) {
+        const platinumLocationModal = $('#platinumLocationModal')
+        const countyList = options.countiesRestriction
+        const radio = $("#platinumLocationModal input[type='radio'][name*='current-location']")
+        const buyPlatinumBtn = $('#buyPlatinumBtn')
+        const buyPlatinumApplePayBtn = $('#buyPlatinumApplePayBtn:not(.js-apay-not-allowed)')
+
+        // Show service not available modal if at least one question answer was NO, show Popup with contact_us link
+        function serviceNotAvailableProcess() {
+            platinumLocationModal.modal('hide');
+            const reasons = [];
+            $("#platinumLocationModal input[type='radio'][value='0'][name*='current-location']:checked").length && reasons.push('is outside of the US');
+            $("#platinumLocationModal input[type='radio'][value='0'][name='spouses-pregnant']:checked").length && reasons.push('is pregnant');
+            reasons.length && $('.unfortunately-text').text('Unfortunately, this service is not available if either spouse ' + reasons.join(' and ') + '.');
+
+            setTimeout(() => {
+                $('#serviceNotAvailable').modal('show')
+            }, 500)
+        }
+
+        // Show error if not all questions was answered
+        function checkAllQuestionsAnswered() {
+            if ($("#platinumLocationModal input[type='radio']:checked").length !== parseInt($("#platinumLocationModal input[type='radio']").length / 2)) {
+                const alertBlock = platinumLocationModal.find('.alert')
+                alertBlock.removeAttr('style');
+                platinumLocationModal.scrollTop(100)
+                return false
+            }
+            return true
+        }
+
+        // Check if in this county we provide Platinum service
+        function checkCounty() {
+            if ( !!($('#county').val() && countyList.indexOf($('#county').val().toLowerCase()) > -1) ) {
+                // $('.unfortunately-text').html('Unfortunately, we do not provide this services  in ' + $('#county').val() + ' at the moment.');
+                platinumLocationModal.modal('hide');
+                setTimeout(() => {
+                    $('#serviceNotAvailable').modal('show')
+                }, 500)
+                return false
+            }
+            return true
+        }
+
+        // Show county field if all answers is YES
+        radio.on('change', function () {
+            if (radio.filter("[value='1']:checked").length === 2 && !!countyList.length) {
+                $('.county-wrap').removeAttr('style');
+            } else {
+                $('.county-wrap').css({'display': 'none'});
+            }
+            platinumLocationModal.find('.alert').css({'display': 'none'});
+        });
+
+        function buyPlatinumWithCreditCard() {
+            buyPlatinumBtn.prop('disabled', true)
+            $.post(options.url, options.data, function (data) {
+                if (data.message) {
+                    platinumLocationModal.modal('hide');
+                    window.location.href = options.successUrl;
+                }
+            }).fail(function (data) {
+                data = JSON.parse(data.responseText)
+                if (data['nocc_redirect']) {
+                    buyPlatinumBtn.prop('disabled', false)
+                    window.location.href = data.redirect_url + options.errorUrl;
+                }
+            });
+        }
+
+        function buyingPlatinumService(methodFn) {
+            // Must answer all questions
+            if ( !checkAllQuestionsAnswered() ) return false
+
+            // If all question answer is YES
+            if ( !$('#platinumLocationModal input[type="radio"][value="0"]:checked').length ) {
+                if ( !checkCounty() ) return false
+                if (methodFn) methodFn()
+            } else {
+                serviceNotAvailableProcess()
+            }
+        }
+
+        // Buy with credit card
+        buyPlatinumBtn.on('click', () => buyingPlatinumService(buyPlatinumWithCreditCard))
+        // Buy with apple pay
+        buyPlatinumApplePayBtn.on('click', function() {
+            buyingPlatinumService(() => {
+                paymentMethodsScripts.applePayScript(...options.applePayScriptOptions)
+            })
+        })
+
+        // Open again modal with qualification questions if Apay not available, but user choose this method
+        $('#mobilePaymentNotAvailableModal').on('hide.bs.modal', () => platinumLocationModal.modal('show') )
+
+        // Writing in database user answers
+        $("#serviceNotAvailable .no-thank").on('click', function () {
+            const $this = $(this),
+                data = {};
+
+            if ($("#platinumLocationModal [name='user-current-location'][value='0']:checked").length) {
+                data['name'] = 'is_petitioner_outside_usa';
+                data['value'] = 1;
+            }
+
+            if ($("#platinumLocationModal [name='spouse-current-location'][value='0']:checked").length) {
+                data['name'] = 'is_respondent_outside_usa';
+                data['value'] = 1;
+            }
+
+            if (data) {
+                data['csrfmiddlewaretoken'] = $("#serviceNotAvailable [name='csrfmiddlewaretoken']").val();
+                $.post($this.attr('data-set-answer'), data, function () {
+                    window.location.href = $this.attr('href');
+                }).fail(function () {
+                    window.location.href = $this.attr('href');
+                });
+            } else {
+                window.location.href = $this.attr('href');
+            }
+            return false;
+        });
+    },
+    missingSpousePageScripts: function(options) {
+        function buyMissingSpouse(btn) {
+            btn.prop('disabled', true)
+            $.post(options.sellUrl, options.data, function(data) {
+                data.message && alert(data.message)
+                window.location.href = data['success_url'] || options.successUrl
+            }).fail(function(data) {
+                btn.removeAttr("disabled")
+                let response = JSON.parse(data.responseText)
+                response.message && alert(response.message)
+                if (response['nocc_redirect']) { window.location.href = options.errorUrl }
+           });
+        }
+
+         $('.buy-missing-spouse-btn-confirm').on('click', function () {
+             const $bth = $(this)
+             buyMissingSpouse($bth)
+         })
+
+        const buyMissingSpouseBtn = $('[data-buy="apay-missing-spouse"]:not(.js-apay-not-allowed)')
+        buyMissingSpouseBtn.on('click', function() {
+            paymentMethodsScripts.applePayScript(...options.applePayScriptOptions)
+        })
+    },
+    modalCallbackRequestScripts: function(options) {
+        const timeSelects = $("#modalCallbackRequest button.dropdown-toggle");
+
+        function clearCallbackRequestFormErrors() {
+            $('#modalCallbackRequest .form-group_error').removeClass('form-group_error')
+            $('#modalCallbackRequest .text-error').remove()
+        }
+
+        $("#modalCallbackRequest").on('show.bs.modal',() => {
+            clearCallbackRequestFormErrors()
+            $('#formCallbackRequest')[0].reset()
+            $("[name=call_asap]").change()
+
+            timeSelects.removeClass("disabled");
+            $('#modalCallbackRequest #callbackRequestScreen1').show();
+            $('#modalCallbackRequest #callbackRequestScreen2').hide();
+        });
+
+        $("[name=call_asap]").change(function (event) {
+            event.target.value === "True" ?
+                timeSelects.addClass("disabled") :
+                timeSelects.removeClass("disabled");
+        });
+
+        $('#modalCallbackRequest #btnSendRequest').click(function(){
+            let formData = $('#formCallbackRequest input, #formCallbackRequest select').serialize();
+
+            $.post(options.url, formData, function(data){
+                if (data['form_success']) {
+                    $('#modalCallbackRequest #callbackRequestScreen1').hide();
+                    $('#modalCallbackRequest #callbackRequestScreen2').show();
+                } else {
+                    clearCallbackRequestFormErrors()
+
+                    $.each(data['form_error'], function(key, item){
+                        const fieldWrapper = $(`#id_callback_${key}`).parent('.form-group')
+                        fieldWrapper.addClass('form-group_error');
+                        fieldWrapper.append( $(`<div class="text-error text-end text-14 mt-2">${item}</div>`) );
+                    });
+                }
+            });
+        });
+    },
+    modalCallbackLauraScripts: function () {
+        $('#btnSendAskLaura').on('click', function () {
+            const form = $('#formCallbackLaura')
+            form.find('.text-error').remove()
+            form.find('.form-group_error').removeClass('form-group_error')
+            $.ajax({
+                type: "POST",
+                url: form.prop('action'),
+                data: form.serialize(),
+
+                success: function (data) {
+                    if(data.success){
+                        $('#callbackLauraAsk').hide()
+                        $('#callbackLauraThank').show()
+                        $('#modalCallbackLaura').one('hidden.bs.modal', function (){
+                            $('#callbackLauraAsk').show()
+                            $('#callbackLauraThank').hide()
+                            form.trigger('reset')
+                        })
+                    } else {
+                        $.each(data['errors'], function (key, item) {
+                            const wrap = $('#id_' + key).parent()
+                            wrap.addClass('form-group_error');
+                            wrap.append('<div class="text-error text-end text-14 mt-2">' + item + '</div>');
+                        });
+                    }
+                },
+                error: function (data) {
+                    console.log(data)
+                }
+            })
+        })
+    },
+    modalCallbackPressPageScripts: function () {
+        $('#btnSendPressPage').on('click', function (e) {
+            e.preventDefault()
+            const form = $('#formCallbackPressPage')
+            form.find('.text-error').remove()
+            form.find('.form-group_error').removeClass('form-group_error')
+
+            $.ajax({
+                method: "POST",
+                url: form.prop('action'),
+                data: form.serialize(),
+
+                success: function (data) {
+                    if(data.success){
+                        $('#callbackPressPage').hide()
+                        $('#callbackPressPageThank').show()
+                        $('#modalCallbackPressPage').one('hidden.bs.modal', function (){
+                            $('#callbackPressPage').show()
+                            $('#callbackPressPageThank').hide()
+                            form.trigger('reset')
+                        })
+                    } else {
+                        $.each(data['errors'], function (key, item) {
+                            const wrap = $('#id_' + key).parent()
+                            wrap.addClass('form-group_error');
+                            wrap.append('<div class="text-error text-end text-14 mt-2">' + item + '</div>');
+                        });
+                    }
+                },
+                error: function (data) {
+                    console.log(data)
+                }
+            })
+        })
+    },
+    noccScripts(options) {
+        // Toggle form for adding new credit card
+        const toggleFormNewCard = $('.toggle-form-new-card')
+        const newCreditFormWrap = $('#newCreditFormWrap')
+        const newCreditForm = $('#addNewCreditForm')
+        const buyWithPrimaryCardBtn = $('#buyWithPrimaryCardBtn')
+        const cardField = newCreditForm.find('[name=card]')
+        toggleFormNewCard.on('click', (e) => {
+            if ( $(e.target).hasClass('show') ) {
+                if (!newCreditFormWrap.is(":visible")) {
+                    newCreditFormWrap.slideDown(300, () => toggleRequiredFields(newCreditForm))
+
+                    buyWithPrimaryCardBtn.hide()
+                    cardField.val('')
+                }
+            } else {
+                newCreditFormWrap.slideUp(300, () => toggleRequiredFields(newCreditForm, false))
+
+                buyWithPrimaryCardBtn.show()
+                const primaryCardId = $('[name=user_cc]:checked').data('pk')
+                cardField.val(primaryCardId)
+            }
+        })
+
+        newCreditFormWrap.is(':visible')
+            ? buyWithPrimaryCardBtn.hide()
+            : !options.dataCard && toggleRequiredFields(newCreditForm, false)
+
+        //Change primary card
+        $('[name=user_cc]').on('change', function(e) {
+            e.preventDefault()
+            let cardId = $(this).data('pk'),
+                cardWrapper = $(this).parents('.user-cc-wrap').eq(0);
+
+            toggleSpinner('show')
+            $.ajax({
+                method: 'PATCH',
+                url: options.updateCreditCardUrl.replace('999999', cardId),
+                headers: { 'X-CSRFToken': options.csrfToken },
+                data: {
+                    primary: true
+                },
+                success: () => {
+                    $(".primary-card").find('input').prop('checked', false);
+                    $(".primary-card").removeClass('primary-card');
+                    $(this).prop('checked', true);
+                    cardWrapper.addClass('primary-card')
+                    cardField.val(cardId)
+                },
+                error: (e) => {
+                    ajaxErrorHandler(e);
+                },
+                complete: () => {
+                    toggleSpinner('hide')
+                }
+            })
+        });
+        //Remove card
+        $(".remove-cc").on('click', function() {
+            let cardId = $(this).parent().find('input').data('pk');
+            $('#modalRemoveCC').find('#removeCCBtn').data('pk', cardId);
+            $('#modalRemoveCC').modal('show');
+        });
+        $('#removeCCBtn').click(function(event) {
+            event.preventDefault();
+            let cardId = $(this).data('pk');
+            toggleSpinner('show')
+
+            $.ajax({
+                method: 'PATCH',
+                url: options.updateCreditCardUrl.replace('999999', cardId),
+                data: { active: false },
+                headers: { 'X-CSRFToken': options.csrfToken },
+                success: () => {
+                    $(`#id_user_cc${cardId}`).parents('div').eq(0).remove();
+                },
+                error: (e) => {
+                    $('#modalRemoveCC').modal('hide');
+                    setTimeout(() => ajaxErrorHandler(e), 500)
+                },
+                complete: () => {
+                    $('#modalRemoveCC').modal('hide');
+                    toggleSpinner('hide')
+                }
+            })
+        });
+
+        const buyWithApplePayBtn = $("#buyWithApplePayBtn:not(.js-apay-not-allowed)")
+        buyWithApplePayBtn.on('click', function() {
+            paymentMethodsScripts.applePayScript(...options.applePayScriptOptions)
+        })
+    },
+    ccpaRequestPageScripts({ requestUrl, pathToErrorIcon }) {
+        const maskOptions = { regex: '\d*', showMaskOnHover: false, removeMaskOnSubmit: true }
+        $('input[name=phone_number]').inputmask(Object.assign({ mask: '(9{3}) 9{3} 9{4}' }, maskOptions))
+        $('input[name=prior_order_number], input[name=last_4_of_card], input[name=last_4_of_ssn]')
+            .inputmask(Object.assign({ mask: '9{*}' }, maskOptions))
+
+        const $mailDelivery = $('input[name=mail_delivery]')
+        const $mailingAddress = $('textarea[name=mailing_address]')
+        function toggleMailingAddress() {
+            if ($mailDelivery.is(':checked')) {
+                $mailingAddress.closest('.js-field-wrap').removeClass('d-none')
+                $mailingAddress.prop('required', true)
+            } else {
+                $mailingAddress.closest('.js-field-wrap').addClass('d-none')
+                $mailingAddress.prop('required', false)
+            }
+        }
+        toggleMailingAddress()
+        $mailDelivery.on('change', toggleMailingAddress)
+
+        $('.js-contact-email-toggle').on('click', function (event) {
+            $(event.target).remove()
+            $('.js-contact-email').removeClass('d-none')
+        })
+
+        class CustomFileField {
+            constructor(selector) {
+                this.$input = $(selector)
+                this.$inputWrap = this.$input.closest('.custom-file-wrap')
+                this.files = [...this.$input.prop('files')]
+                this.$input.val('')
+                this.name = this.$input.prop('name')
+                this.multiple = this.$input.prop('multiple')
+                this.renderFileItems()
+                this.$input.change(() => {
+                    this.addFileItem()
+                })
+                this.$inputWrap.click(event => {
+                    $(event.target).hasClass('file-item-delete') && this.deleteFileItem(event.target.dataset.fileIndex)
+                })
+            }
+            renderFileItems() {
+                this.$inputWrap.find('.file-item').remove()
+                this.files.forEach((file, index) => (
+                    this.$inputWrap.append(`
+                        <div class='file-item d-flex ai-center jc-between py-2 px-3 mt-4 mb-n3 rounded'>
+                            <div class='file-item-title'>${file.name}<br>${(file.size / 1024).toFixed(2)}Kb</div>
+                            <div class='file-item-delete cursor-pointer ml-auto' data-file-index='${index}'>&#10006;</div>
+                        </div>
+                    `)
+                ))
+            }
+            addFileItem() {
+                const newFiles = this.multiple ? [...this.files, ...this.$input.prop('files')] : [...this.$input.prop('files')]
+                this.files = newFiles
+                this.$input.val('')
+                this.renderFileItems()
+            }
+            deleteFileItem(index) {
+                const newFiles = [...this.files]
+                newFiles.splice(index, 1)
+                this.files.splice(index, 1)
+                this.renderFileItems()
+            }
+        }
+        const filesDetailsOfAuthorized = new CustomFileField('input[type=file][name=files_details_of_authorized]')
+        const fileDeclaration = new CustomFileField('input[type=file][name=file_declaration]')
+
+        const renderFormError = textError => (`
+            <div class="form-errors text-error align-items-sm-start p-2 rounded bg-error-bg mb-3">
+                <img class="mr-2 mb-1" src="${pathToErrorIcon}" alt="icon error point">
+                ${textError}    
+            </div>
+        `)
+        const $form = $('#CCPARequestForm')
+        const $btn = $form.find('.btn-submit')
+
+        $btn.on('click',()=>{
+            $form.submit()
+        })
+        $form.on('submit', function (event) {
+            event.preventDefault()
+            $btn.prop('disabled', true)
+            $form.find('.form-errors').remove()
+            $form.find('.error-wrap').removeClass('error-wrap')
+            const data = new FormData(event.target)
+            filesDetailsOfAuthorized.files.forEach((file, index) => {
+                index === 0 ? data.set(filesDetailsOfAuthorized.name, file) : data.append(filesDetailsOfAuthorized.name, file)
+            })
+            fileDeclaration.files.forEach((file, index) => {
+                index === 0 ? data.set(fileDeclaration.name, file) : data.append(fileDeclaration.name, file)
+            })
+            $.ajax({
+                type: 'POST',
+                url: requestUrl,
+                data: data,
+                processData: false,
+                contentType: false,
+            })
+                .done(() => {
+                    $form.remove()
+                    $('.thankyou').removeClass('d-none')
+                })
+                .fail(response => {
+                    $btn.prop('disabled', false)
+                    const data = JSON.parse(response.responseText)
+                    Object.entries(data).forEach(([key, values], index) => {
+                        if (['__all__', 'non_field_errors'].includes(key)) {
+                            return values.forEach(item => $form.append(renderFormError(item)))
+                        }
+                        const $wrap = $form.find(`input[name=${key}], textarea[name=${key}]`).closest('.js-field-wrap')
+                        index === 0 && $('html, body').animate({ scrollTop: $wrap.offset().top })
+                        $wrap.find('input:not([type=checkbox],[type=file]), textarea').length && $wrap.addClass('error-wrap')
+                        $wrap.append(renderFormError(values))
+                    })
+                })
+        })
+    },
+    inputShowHide() {
+        const toggleClass = 'show-hide'
+        if ($(`.${toggleClass}`).length) {
+            $(document).on('click', (e) => {
+                const target = $(e.target)
+                if (target.hasClass(toggleClass)) {
+                    const wrapper = target.parents('.form-floating_toggle-visibility').eq(0)
+                    wrapper.toggleClass('shown')
+                    const input = wrapper.find('input')
+                    wrapper.hasClass('shown') ? input.prop('type', 'text') : input.prop('type', 'password')
+                }
+            })
+        }
+    },
+    fixFloatingLabel() {
+        function fixFloatingLabel() {
+            const floatingWraps = $('.form-floating')
+            floatingWraps.each((i, el) => {
+                const DEFAULT_HEIGHT = 18 // line-height one line of label
+                const DEFAULT_PADDING_TOP = 1.95 // current default value in css
+                const labelTextHeight = $(el).find('.js-float').innerHeight()
+                const field_input = $(el).find('input')
+                const field_select = $(el).find('select')
+                const select_btn = field_select.parent().find('button')
+                if (labelTextHeight > DEFAULT_HEIGHT) {
+                    const heightValue = (labelTextHeight - DEFAULT_HEIGHT) + 60
+                    $(field_input).css({'height': heightValue, 'padding-top': DEFAULT_PADDING_TOP + Math.floor(labelTextHeight / 18) + 'rem'})
+                    $(select_btn).css({'max-height': labelTextHeight + 60, 'padding-top': DEFAULT_PADDING_TOP + Math.floor(labelTextHeight / 18) + 'rem'})
+                } else {
+                    $(field_input).removeAttr('style')
+                }
+            })
+        }
+        $(document).on('change',$('[data-question-name]'),()=>fixFloatingLabel())
+        $(window).on('load orientationchange resize', fixFloatingLabel)
+
+        if (window.MutationObserver) {
+            const observer = new MutationObserver(fixFloatingLabel);
+            const config = { childList: true, subtree: true };
+            document
+                .querySelectorAll("form")
+                .forEach((element) => observer.observe(element, config));
+        } else {
+            $("form").on("DOMNodeInserted", fixFloatingLabel);
+        }
+    },
+    paymentScripts(shortExp) {
+        const paymentForm = $('#paymentForm')
+        const paymentFormSubmitBtn = $('[type=submit]', paymentForm)
+        $('.js-download').click(function (){
+            $('html, body').animate({scrollTop: paymentForm.offset().top}, 500);
+        })
+        paymentForm.on('submit', () => paymentFormSubmitBtn.prop('disabled', true))
+
+        const $slider = $('.star-slick');
+        const $sliderWrap = $slider.parents('.reviews-content');
+        $slider.slick({
+            speed: 1000,
+            dots: false,
+            infinite: shortExp ? true : false,
+            slidesToShow: shortExp ? 1 : 1.3,
+            adaptiveHeight: true,
+            prevArrow: $('.custom-slick-prev', $sliderWrap),
+            nextArrow: $('.custom-slick-next', $sliderWrap)
+        });
+    },
+    allTermsFunnelScripts() {
+        const allTermsFunnelModal = new bootstrap.Modal(document.getElementById("allTermsFunnelModal"));
+        function changeModalContent(termsContent) {
+            document.getElementById("allTermsFunnelModal").scrollTop = 0;
+            document.querySelectorAll("#allTermsFunnelModal [data-terms-content]:not(a)").forEach(function (elem) {
+                elem.dataset.termsContent === termsContent ?
+                    elem.classList.remove("d-none") : elem.classList.add("d-none");
+            });
+        };
+        document.querySelectorAll("a[data-terms-content]").forEach(function (elem) {
+            elem.addEventListener("click", function () {
+                allTermsFunnelModal.show();
+                changeModalContent(elem.dataset.termsContent);
+            });
+        });
+    },
+    scrollToBlock(btn, scrollToEl=0, time=400) {
+        btn.click(() => {$('html, body').animate({scrollTop: scrollToEl && scrollToEl.offset().top}, time)})
+    },
+    showVideoScript() {
+        const showVideoBtn = $('#showVideo')
+        const showVideoIframe = $('#iframeVideo')
+        const video = $('#iframeVideo iframe')
+
+        showVideoBtn.click(() => {
+            showVideoBtn.removeClass('d-block').addClass('d-none')
+            showVideoIframe.removeClass('d-none')
+            video.prop('src', 'https://player.vimeo.com/video/706534533?h=e4ff1e6b0b')
+        })
+    },
+    dynamicHeightForIframe(proportion) {
+        const showVideoBtn = $('#showVideo')
+        const showVideoIframe = $('#iframeVideo')
+        function setIframeHeight() {
+            const currW = $('#iframeVideo iframe').innerWidth()
+            const resultHeight = currW / proportion
+            showVideoIframe.css({height: `${resultHeight}px`})
+        }
+        $(window).on('resize orientationchange', setIframeHeight)
+        showVideoBtn.click(setIframeHeight)
+    },
+    qdroLanding: ({ property, urlNext, urlQDROLanding }) => {
+        const inputsProperty = $(`input[name='${property}']`);
+        if (inputsProperty.length) {
+            const inputRedirect = $('input[name=redirect]');
+            function toggleRedirect() {
+                return $(`input[name='${property}']:checked`).val() === '1' ?
+                    inputRedirect.val(urlQDROLanding) :
+                    inputRedirect.val(urlNext);
+            }
+            toggleRedirect();
+            inputsProperty.on('change', toggleRedirect);
+        }
+    },
+    hideDivider() {
+        if($('.js-divorce-offers').find('._offer:visible').length === 0) {
+            $('.js-divorce-divider').removeClass('d-flex').hide();
+        } else {
+            $('.js-divorce-divider').addClass('d-flex').show();
+        }
+    },
+    offersFilter() {
+        $('.js-offer-filter').on('click', (e) => {
+            const filter = $(e.currentTarget);
+            const filterData = filter.data('filter');
+            const offersList = $('._offer');
+
+            if(filter.hasClass('active')) return;
+
+            $('.js-offer-filter').removeClass('active');
+            filter.addClass('active');
+
+            if(filterData === 'all') {
+                offersList.show();
+
+                return;
+            }
+
+            offersList
+                .hide()
+                .filter((i, offer) => {
+                    return $(offer).data(filterData) == true;
+                }).show();
+
+            ddcScripts.hideDivider();
+        });
+        $('.js-offer-filter-badge').on('click', (e) => {
+            e.preventDefault();
+
+            const offerData = $(e.currentTarget).data('filter');
+
+            $(`.js-offer-filter[data-filter=${offerData}]`).trigger('click');
+        })
+    },
+    offersSearch() {
+        const searchBtn = $('.js-search-btn');
+        const searchInput = $('.js-search-input:visible');
+        let titlesArr = [];
+        let descrArr = [];
+        let offersList = $('._offer');
+
+        $(offersList).each((i, offer) => {
+            titlesArr.push({
+                text: $(offer).find('.js-offer-title').text().toLowerCase(),
+                type: $(offer).data('offer')
+            });
+            descrArr.push({
+                text: $(offer).find('.js-offer-description').text().toLowerCase(),
+                type: $(offer).data('offer')
+            })
+        });
+
+        searchInput.on('input keypress', e => {
+            if($(e.currentTarget).val().trim().length > 2) {
+                $('.js-search-clear').toggleClass('d-none', false);
+                searchBtn.prop('disabled', false);
+                if(e.which == 13) {
+                    searchBtn.trigger('click');
+                }
+            } else {
+                $('.js-search-clear').toggleClass('d-none', true);
+                searchBtn.prop('disabled', true);
+            }
+
+        })
+
+        $('.js-category-select').on('change', e => {
+            const category = $(e.currentTarget).val()
+
+            offersList = $('._offer');
+
+            if(category !== 'all') {
+                offersList = $('._offer').filter((i, offer) => {
+                                return $(offer).data(category) == true;
+                            });
+            }
+        })
+
+        searchBtn.on('click', () => {
+            const searchText = searchInput.val().trim().toLowerCase();
+            $('._offer').hide();
+
+            titlesArr.forEach(title => {
+                if(title.text.indexOf(searchText) !== -1) {
+                    offersList.filter((i, offer) => $(offer).data('offer') === title.type).show();
+                }
+            })
+            descrArr.forEach(descr => {
+                if(descr.text.indexOf(searchText) !== -1) {
+                    offersList.filter((i, offer) => $(offer).data('offer') === descr.type).show();
+                }
+            });
+
+            $('.js-offer-filter.active').removeClass('active');
+
+            ddcScripts.hideDivider();
+        })
+    },
+    offersSearchClear() {
+        $('.js-search-input:visible').val('');
+        $('.js-offer-filter[data-filter="all"]').trigger('click');
+        $('.js-search-clear').toggleClass('d-none', true);
+        $('.js-search-btn').prop('disabled', true);
+    },
+    offerTracking:(GA_allowed) => {
+        if(!GA_allowed) return;
+        $('._offer').each((i, offer) => {
+            ga('send', 'pageview', `${$(offer).data('offer')}-offer-shown`);
+
+            $(offer).on('click', (e) => {
+                ga('send', 'event', `${$(e.currentTarget).data('offer')}-offer-click`, 'click');
+            });
+        });
+    },
+    feedbackScripts(options) {
+        function checkFields(form) {
+            let isValid = true;
+            form.find('input[type="radio"], textarea, select').each(function () {
+                let $this = $(this);
+                $this.closest('.form-group').removeClass('form-error');
+                if (!$this.val()) {
+                    $this.closest('.form-group').addClass('form-error');
+                    isValid = false;
+                }
+            });
+            form.find('input[type=radio]').each(function () {
+                let $this = $(this);
+                form.find(`input[type=radio][name=${$this.attr('name')}]:checked`).length === 0 ? isValid = false : null;
+                form.find('input[type=checkbox]:checked') ? isValid = true : null;
+            });
+            if (!isValid) {
+                alert('Please add your review');
+            }
+            return isValid;
+        }
+
+        //Feedback modal
+        let feedbackForm = $("#feedbackFormModal");
+        $("#laterFeedback").click(function() {
+            $.post(options.urlFeedback,
+                {csrfmiddlewaretoken: options.csrf, later: 1},
+                () => $('#feedbackModal').modal('hide')
+            );
+        });
+
+        let useRating,treatRating,recommendRating,useRatingStar,useRatingEmoji;
+        feedbackForm.find('input[type=radio]').on('change',function (){
+            $(feedbackForm.serializeArray()).each(function (i,el){
+                switch(el['name']) {
+                    case 'use_rating':
+                        useRating = el['value']
+                        break;
+                    case 'treat_rating':
+                        treatRating = el['value']
+                        break;
+                    case 'recommend_rating':
+                        recommendRating = el['value']
+                        break;
+                    case 'rating_star':
+                        useRatingStar = el['value']
+                        break;
+                    case 'rating_emoji':
+                        useRatingStar = el['value']
+                        break;
+                }
+            })
+            if (useRating > 5 && treatRating > 5 && recommendRating > 5 || useRatingStar > 3 || useRatingEmoji > 3 ) {
+                setTimeout(()=>{
+                    $('#modalTrustPilot').modal('show');
+                },1000)
+            }
+        })
+
+        feedbackForm.on('submit', function(e) {
+            e.preventDefault();
+            if (checkFields(feedbackForm)) {
+                $.post(options.urlFeedback, feedbackForm.serialize(), function () {
+                    $('#feedbackModal').modal('hide');
+                });
+            }
+            return false;
+        });
+    },
+    pageBlogDetail: function() {
+
+        // Form content aside menu
+        // example article content: <h3 id="subtitle" data-anchor="anchor">1st title</h3>
+        let subTitles = $('.artcl-content').find('[data-anchor]'),
+            asideContentMenu = $('#asideContentMenu'),
+            contentMenu = '';
+        asideContentMenu.append('<li><a href="#mainTitle">' + $('#mainTitle')[0].textContent + '</li></a>')
+        for (let i = 0; i < subTitles.length; i++) {
+            let contentP = subTitles[i].textContent.replace(/[.:]$/, "");
+            if ( subTitles.eq(i).attr('data-list') === 'start' ) {
+                contentMenu += '<' + subTitles.eq(i).attr('data-list-type') + ' class="list-unstyled ' + subTitles.eq(i).attr('data-list-class') + '">';
+            }
+
+            contentMenu += '<li><a href="#' + subTitles[i].id + '">' + contentP + '</li></a>';
+
+            if ( subTitles.eq(i).attr('data-list') === 'end' ) {
+                contentMenu += '</' + subTitles.eq(i).attr('data-list-type') + '>';
+            }
+        }
+        asideContentMenu.append(contentMenu);
+
+        $(document).on('scroll ready', function () {
+            var articleTop = $('article').offset().top,
+                articleEndTop = $('.entry-rating').offset().top,
+                scrollPosition = $(window).scrollTop();
+            if (scrollPosition >= articleTop && scrollPosition <= articleEndTop) {
+                var percent = (scrollPosition - articleTop) * 100 / (articleEndTop - articleTop);
+                $('.progress-bar').css({'width': percent + '%', 'display': 'block'});
+            }
+            if (scrollPosition < articleTop) {
+                $('.progress-bar').css({'display': 'none'});
+            }
+            if (scrollPosition > articleEndTop) {
+                $('.progress-bar').css({'width': '100%', 'display': 'block'});
+            }
+        });
+        ddcScripts.scrollToBlock($('.scroll-to-top'))
+    },
+    prenupAgreementScript: function() {
+        const prenupType = '/prenuptial-agreement/'
+        const prenupReviewType = '/prenuptial-agreement-review/'
+        const prenupWithReviewType = '/prenuptial-agreement-with-review/'
+        const kidsQuestions = ['number_of_children', 'spouse_age', 'how_many_kids', 'how_many_kids_spouse']
+        kidsQuestions.forEach((val) => {
+            maskField(`[name=${val}]`, '9{3}')
+        })
+        const statePopup = $('#statesPopupId')
+        const statePopupNotSupport = $('#statesPopupIdNotSupport')
+
+        $('#statesPopupId [data-supported="0"]').on('click', (e) => {
+            const target = $(e.target).html().trim()
+            statePopup.modal('hide')
+            setTimeout(() => {
+                const state = target.replace(/ /g, '-').toLowerCase()
+                $('#id_not_support_state').prev().find(`[data-value='${state}']`).click()
+                statePopupNotSupport.modal('show')
+            }, 400)
+        })
+
+        const statePrenupLinks = $('.js-prenup', statePopup)
+        const linksShowPopup = $('[data-bs-target="#statesPopupId"]')
+        let previousProduct = prenupType, selectedProduct
+        linksShowPopup.on('click', function() {
+            if ($(this).hasClass('js-prenup-review')) {
+                selectedProduct = prenupReviewType
+            } else if ($(this).hasClass('js-prenup')) {
+                selectedProduct = prenupType
+            } else {
+                selectedProduct = prenupWithReviewType
+            }
+
+            statePrenupLinks.each(function() {
+                $(this).prop('href', $(this).prop('href').replace(previousProduct, selectedProduct))
+            })
+            previousProduct = selectedProduct
+        })
+
+        const form = $('#notSupportForm')
+        const formBtn = $('#sendSupportForm')
+        const formBlock = $('#notSupportFormWrap')
+        const thankBlock = $('#notSupportThank')
+
+        formBtn.on('click', function () {
+            $(this).prop('disabled', true)
+            $('#notSupportForm .form-group_error').removeClass('form-group_error')
+                    $('#notSupportForm .text-error').remove()
+
+            $.ajax({
+                type: "POST",
+                url: formBtn.data('url'),
+                data: form.serialize(),
+
+                success: response => {
+                    if (response.email) {
+                        formBlock.hide()
+                        thankBlock.show()
+                    }
+                },
+                error: response => {
+                    $(this).prop('disabled', false)
+                    const errors = JSON.parse(response.responseText)
+                    Object.entries(errors).forEach(([key, values], index) => {
+                        const input = $(`[name=${key}]`)
+                        input.parents('.col-24').addClass('error').append(`
+                        <div class="text-error text-end text-14 mt-2">${values}</div>
+                        `)
+
+                    })
+                }
+            })
+            $('.btn-close').on('click', function (){
+               $('.form-control').parents('.col-24').removeClass('error').find('.text-error').remove()
+            })
+
+        })
+    },
+    limitedDiscountOfferScripts: ({ time, csrfmiddlewaretoken, url }) => {
+        const $hours = $(".limited-time-offer-timer .hours");
+        const $minutes = $(".limited-time-offer-timer .minutes");
+        const $seconds = $(".limited-time-offer-timer .seconds");
+        const $form = $("form:not(#formCallbackRequest)");
+        let timeInSeconds = parseInt(time) - parseInt(new Date().getTime() / 1000);
+        let interval = null;
+
+        function changeNumbers(numbers, $elements) {
+            const numbersString = numbers < 10 ? "0" + numbers : numbers.toString();
+            Array.prototype.forEach.call(numbersString, (number, index) => (
+                $($elements.get(index)).text(number)
+            ));
+        }
+
+        function setTime() {
+            const hours = Math.floor(timeInSeconds / 60 / 60);
+            const minutes = Math.floor(timeInSeconds / 60) - (hours * 60);
+            const seconds = Math.floor(timeInSeconds % 60);
+
+            changeNumbers(hours, $hours);
+            changeNumbers(minutes, $minutes);
+            changeNumbers(seconds, $seconds);
+        }
+
+        function tickTimer() {
+            if (timeInSeconds <= 0) {
+                window.location.reload();
+                return clearInterval(interval);
+            }
+            timeInSeconds = --timeInSeconds;
+            setTime();
+        }
+
+        setTime();
+        interval = setInterval(tickTimer, 1000);
+
+        $form.on("submit",function (e){
+            e.preventDefault();
+            $.post(url, { csrfmiddlewaretoken })
+                .done(() => {
+                    $form.off("submit");
+                    $form.submit();
+                })
+                .always(() => clearInterval(interval));
+        });
+    },
+}
+
+ddcScripts.headerMenuScripts()
+ddcScripts.accordionPlugin()
+ddcScripts.maskPhoneScripts()
+ddcScripts.maskCCFieldScript()
+// ddcScripts.phoneNumberWidgetScripts()
+ddcScripts.inputShowHide()
+
+$(window).bind("pageshow", function(event) {
+    // Because safari browser back button has cache and csrf check failed
+    if (event.originalEvent.persisted) {
+        window.location.reload()
+    }
+
+    if (/iPhone|iPod|iPad|Safari/i.test(navigator.userAgent)) {
+        // To allow show hover effects on safari and apple devices
+        $('body').on('touchstart', () => {})
+    }
+});
